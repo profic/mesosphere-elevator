@@ -38,6 +38,10 @@ class Elevator(id: Int) {
   def idle = tasks.isEmpty
   def free = orders.isEmpty
 
+  def distance(to: Int): Int = {
+    math.abs(to - pos)
+  }
+
   def direction: Direction = {
     tasks.headOption.map({ t =>
       if (t.to - pos > 0) {
@@ -150,6 +154,43 @@ class FCFS extends ControlSystem {
   }
 }
 
+// Keep ordering, but:
+// 1. Serve closest free lift
+// 2. Get people on the way
+class Improved extends ControlSystem {
+  override def step = {
+    // Pickup any guys on the way
+    elevators.foreach({ e =>
+      val move = queue.filter(_.at == e.pos)
+      move.foreach({ o =>
+        e.orders = e.orders.+:(o.asInstanceOf[Order])
+        queue -= o
+      })
+    })
+
+    // Assign tasks
+    var free = elevators.filter({ e => e.idle && e.free })
+    while (queue.nonEmpty && free.nonEmpty) {
+      // Send lifts after an order
+      val task = queue.remove(0)
+
+      free = free.sortWith({(a, b) => a.distance(task.at) < b.distance(task.at)})
+
+      val elevator = free.head
+      if (elevator.pos != task.at) {
+        // Serve pickup
+        elevator.tasks = List(Task(task.at))
+      }
+      free = free.tail
+    }
+
+    // Lift with orders
+    elevators.filter({ e => e.idle && !e.free }).foreach({ e =>
+      e.tasks = List(Task(e.orders.head.to))
+    })
+  }
+}
+
 trait TimeMachine {
   var clock = 0
 
@@ -164,7 +205,8 @@ class Building(floors: Int, elevators: Int, residents: Int) extends TimeMachine 
 
   val property = 1 to elevators map { _ => Elevator() }
   val controller: ControlSystem = {
-    val c = new FCFS
+    // val c = new FCFS
+    val c = new Improved
     c.connect(property)
     c
   }
