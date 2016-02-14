@@ -159,7 +159,7 @@ class FCFS extends ControlSystem {
   }
 }
 
-// Keep ordering, but:
+// Greedy algorithm and:
 // 1. Serve closest free lift
 // 2. Get people on the way
 class Improved extends ControlSystem {
@@ -171,32 +171,18 @@ class Improved extends ControlSystem {
       pending.filter(_.at == e.pos).foreach({ o =>
         e.orders = e.orders.+:(o.asInstanceOf[Order])
         pending.remove(pending.indexOf(o))
-
-        // Take floor with it
-        val constraint = e.orders.head.direction
-        val move = queue.filter(_.at == e.pos)
-        move.foreach({ o =>
-          if (constraint == o.direction) {
-            e.orders = e.orders.+:(o.asInstanceOf[Order])
-            queue -= o
-          }
-        })
       })
     })
 
     // Pickup any guys on the way
     elevators.filterNot({ e => e.free }).foreach({ e =>
-      val move = queue.filter(_.at == e.pos)
-      val constraint = e.orders.head.direction
-      move.foreach({ o =>
-        if (constraint == o.direction) {
-          e.orders = e.orders.+:(o.asInstanceOf[Order])
-          queue -= o
-        }
+      queue.filter({ t => t.at == e.pos && t.direction == e.direction }).foreach({ o =>
+        e.orders = e.orders.+:(o.asInstanceOf[Order])
+        queue -= o
       })
     })
 
-    // Send all same floor Pickups to the pending, must keep same direction
+    // Group by Pickups to the pending, must keep same direction
     for (task <- pending) {
       queue.filter({ t => t.at == task.at && t.direction == task.direction }).foreach({ o =>
         pending += o
@@ -215,7 +201,7 @@ class Improved extends ControlSystem {
       if (e.pos != task.at) {
         // Serve pickup
         e.tasks = List(Task(task.at))
-        // Send all same floor Pickups to the pending, must keep same direction
+        // Group by Pickups to the pending, must keep same direction
         queue.filter({ t => t.at == task.at && t.direction == task.direction}).foreach({ o =>
           pending += o
           queue -= o
