@@ -196,19 +196,30 @@ class Improved extends ControlSystem {
       })
     })
 
-    // Assign tasks
+    // Send all same floor Pickups to the pending, must keep same direction
+    for (task <- pending) {
+      queue.filter({ t => t.at == task.at && t.direction == task.direction }).foreach({ o =>
+        pending += o
+        queue -= o
+      })
+    }
+
+    // Assign PickUps to free elevators
     var free = elevators.filter({ e => e.idle && e.free })
     while (queue.nonEmpty && free.nonEmpty) {
       // Send lifts after an order
       val task = queue.remove(0)
 
       free = elevators.filter({ e => e.idle && e.free }).sortWith({(a, b) => a.distance(task.at) < b.distance(task.at)})
-      val elevator = free.head
-      if (elevator.pos != task.at) {
+      val e = free.head
+      if (e.pos != task.at) {
         // Serve pickup
-        elevator.tasks = List(Task(task.at))
-
-        // TODO: send all same floor Pickups to the pending, must keep same direction
+        e.tasks = List(Task(task.at))
+        // Send all same floor Pickups to the pending, must keep same direction
+        queue.filter({ t => t.at == task.at && t.direction == task.direction}).foreach({ o =>
+          pending += o
+          queue -= o
+        })
       }
 
       free = free.tail
