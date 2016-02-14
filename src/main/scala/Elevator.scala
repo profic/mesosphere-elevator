@@ -186,7 +186,10 @@ class Improved extends ControlSystem {
 
     // Lift with orders
     elevators.filter({ e => e.idle && !e.free }).foreach({ e =>
-      e.tasks = List(Task(e.orders.head.to))
+      // Greedy: go for closest distance
+      e.tasks = List(Task(e.orders.sortWith({
+        (a, b) => math.abs(a.to - e.pos) < math.abs(b.to - e.pos)
+      }).head.to))
     })
   }
 }
