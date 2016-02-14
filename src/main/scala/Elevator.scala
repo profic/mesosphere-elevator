@@ -20,7 +20,7 @@ case class Order(oid: Int, from: Int, to: Int, time: Int) extends PickupRequest 
 
   override def at = from
 
-  override def direction = {
+  override def direction: Direction = {
     if (to > from) {
       Up
     } else {
@@ -152,19 +152,47 @@ class FCFS extends ControlSystem {
       e.tasks = List(Task(e.orders.head.to))
     })
   }
+
+  override def status: ControlSystemStatus = {
+    println(s"Pending ${pending}")
+    super.status
+  }
 }
 
 // Keep ordering, but:
 // 1. Serve closest free lift
 // 2. Get people on the way
 class Improved extends ControlSystem {
+  var pending = new ListBuffer[PickupRequest]()
+
   override def step = {
-    // Pickup any guys on the way
-    elevators.foreach({ e =>
-      val move = queue.filter(_.at == e.pos)
-      move.foreach({ o =>
+    // Pickup destination floor
+    elevators.filter({ e => e.idle && e.free }).foreach({ e =>
+      pending.filter(_.at == e.pos).foreach({ o =>
         e.orders = e.orders.+:(o.asInstanceOf[Order])
-        queue -= o
+        pending.remove(pending.indexOf(o))
+
+        // Take floor with it
+        val constraint = e.orders.head.direction
+        val move = queue.filter(_.at == e.pos)
+        move.foreach({ o =>
+          if (constraint == o.direction) {
+            e.orders = e.orders.+:(o.asInstanceOf[Order])
+            queue -= o
+          }
+        })
+      })
+    })
+
+    // Pickup any guys on the way
+    elevators.filterNot({ e => e.free }).foreach({ e =>
+      val move = queue.filter(_.at == e.pos)
+      val constraint = e.orders.head.direction
+      move.foreach({ o =>
+        if (constraint == o.direction) {
+          e.orders = e.orders.+:(o.asInstanceOf[Order])
+          queue -= o
+        }
       })
     })
 
@@ -174,23 +202,31 @@ class Improved extends ControlSystem {
       // Send lifts after an order
       val task = queue.remove(0)
 
-      free = free.sortWith({(a, b) => a.distance(task.at) < b.distance(task.at)})
-
+      free = elevators.filter({ e => e.idle && e.free }).sortWith({(a, b) => a.distance(task.at) < b.distance(task.at)})
       val elevator = free.head
       if (elevator.pos != task.at) {
         // Serve pickup
         elevator.tasks = List(Task(task.at))
+
+        // TODO: send all same floor Pickups to the pending, must keep same direction
       }
+
       free = free.tail
+      pending += task
     }
 
     // Lift with orders
-    elevators.filter({ e => e.idle && !e.free }).foreach({ e =>
+    elevators.filter({ e => !e.free }).foreach({ e =>
       // Greedy: go for closest distance
       e.tasks = List(Task(e.orders.sortWith({
         (a, b) => math.abs(a.to - e.pos) < math.abs(b.to - e.pos)
       }).head.to))
     })
+  }
+
+  override def status: ControlSystemStatus = {
+    println(s"Pending ${pending}")
+    super.status
   }
 }
 
