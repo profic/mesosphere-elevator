@@ -78,7 +78,7 @@ trait ElevatorController {
   var prev: Option[Goal] = None
 
   def next = tasks.headOption
-  def idle = tasks.isEmpty
+  def idle = direction == Idle
   def floor: Int
 
   def step(): Unit
@@ -124,20 +124,18 @@ class Elevator(id: Int) extends ElevatorState with ElevatorController {
 
     tasks = selectNextStep
 
-    // Make a step
-    val d = direction
-    if (d == Up) {
+    if (direction == Up) {
       pos += 1
-    } else if (d == Down) {
+    } else if (direction == Down) {
       pos -= 1
-    } else if (tasks.nonEmpty) {
+    }
+
+    if (direction == Idle && tasks.nonEmpty) {
       prev = Option(tasks.head)
       tasks = tasks.tail
     }
 
-    tasks = selectNextStep
-
-    if (takeoff > 0 && tasks.isEmpty) {
+    if (takeoff > 0 && free && idle) {
       this.prev = None
     }
   }
