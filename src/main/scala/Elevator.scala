@@ -6,6 +6,13 @@ case object Up extends Direction
 case object Down extends Direction
 case object Idle extends Direction
 
+// For the sake of simplicity it will be a trait implemented by the Intention,
+// which is an Order in mind of the Resident
+trait PickupRequest {
+  def at: Int
+  def direction: Direction
+}
+
 /**
   * Goal describe demand to achieve certain floor
   *
@@ -13,13 +20,9 @@ case object Idle extends Direction
   * @param dir Reserved direction
   * @param score Schedule score counted for this goal
   */
-case class Goal(to: Int, dir: Direction, score: Double)
-
-// For the sake of simplicity it will be a trait implemented by the Intention,
-// which is an Order in mind of the Resident
-trait PickupRequest {
-  def at: Int
-  def direction: Direction
+case class Goal(to: Int, dir: Direction, score: Double) {
+  def same(r: PickupRequest): Boolean = r.at == to && r.direction == dir
+  def same(g: Goal): Boolean = g.to == to && g.dir == dir
 }
 
 case class Order(oid: Int, from: Int, to: Int, time: Int) extends PickupRequest {
@@ -61,27 +64,19 @@ trait ElevatorState {
       distance(to.at)
     }
   }
-
-  def goal(to: PickupRequest): Goal = Goal(to.at, to.direction, distance(to))
-
-  def goal(to: Order): Goal = {
-    if (orders.contains(to)) {
-      Goal(to.to, to.direction, distance(to.to))
-    } else {
-      goal(to.asInstanceOf[PickupRequest])
-    }
-  }
 }
 
 trait ElevatorController {
   var tasks: List[Goal] = List()
   var prev: Option[Goal] = None
 
-  def next = tasks.headOption
+  def goal = tasks.headOption
   def idle = direction == Idle
   def floor: Int
 
   def step(): Unit
+
+  def stop() = tasks = List()
 
   def direction: Direction = direction(tasks.headOption)
 
@@ -108,11 +103,16 @@ trait ElevatorController {
 class Elevator(id: Int) extends ElevatorState with ElevatorController {
   override def floor = pos
 
-  override def step(): Unit = {
-    // Server all this floor orders - this is ideal world
-    val takeoff = orders.count(_.to == pos)
-    orders = orders.filter(_.to != pos)
+  private[this] def goal(to: Order): Goal = {
+    def goal(to: PickupRequest): Goal = Goal(to.at, to.direction, distance(to))
+    if (orders.contains(to)) {
+      Goal(to.to, to.direction, distance(to.to))
+    } else {
+      goal(to.asInstanceOf[PickupRequest])
+    }
+  }
 
+  override def step(): Unit = {
     // If there are requests inside the elevator is busy
     // If it's idle in that case, go for the closest
     def selectNextStep =
@@ -129,6 +129,10 @@ class Elevator(id: Int) extends ElevatorState with ElevatorController {
     } else if (direction == Down) {
       pos -= 1
     }
+
+    // Server all this floor orders - this is ideal world
+    val takeoff = orders.count(_.to == pos)
+    orders = orders.filter(_.to != pos)
 
     if (direction == Idle && tasks.nonEmpty) {
       prev = Option(tasks.head)
@@ -161,10 +165,10 @@ trait ControlSystem {
   def connect(to: Seq[Elevator]): Unit
   def pickup(o: PickupRequest): Unit
   def status: ControlSystemStatus
-  def step(): Unit
+  def score(e: Elevator)(g: PickupRequest): Option[Goal]
 }
 
-abstract class ControlSystemBase extends ControlSystem {
+abstract class ControlSystemBase extends ControlSystem with TimeMachine {
   // For the sake of simplicity we keep it here not to repeat this in Building
   var queue = new ListBuffer[PickupRequest]()
 
@@ -182,61 +186,16 @@ abstract class ControlSystemBase extends ControlSystem {
     }
   }
 
-  // TODO: goals weight here could be wait time metric
-  def goals: Iterable[Goal] = queue.groupBy(_.at).flatMap({ a =>
-    a._2.groupBy(_.direction).map({b => Goal(b._2.head.at, b._1, 0.0)})
+  def goals: Iterable[PickupRequest] = queue.groupBy(_.at).flatMap({ a =>
+    a._2.groupBy(_.direction).map({b => b._2.head})
   })
 
-  // TODO: goals weight here could be wait time metric
-  def assignedGoals: Iterable[Goal] = elevators.flatMap({ e => e.orders.map(e.goal) ++ e.tasks }).groupBy(_.to).flatMap({ a =>
-    a._2.groupBy(_.dir).map({b => Goal(b._2.head.to, b._1, 0.0)})
+  def assignedGoals: Iterable[PickupRequest] = elevators.flatMap(_.orders).groupBy(_.to).flatMap({ a =>
+    a._2.groupBy(_.direction).map({b => b._2.head})
   })
 
-  def unassignedGoals: Iterable[Goal] = goals.toSet -- assignedGoals
-}
+  def unassignedGoals: Iterable[PickupRequest] = goals.toSet -- assignedGoals
 
-// First-come First-served implementation of ControlSystem
-class FCFS extends ControlSystemBase {
-  var pending = new ListBuffer[PickupRequest]()
-
-  override def step() = {
-    // Server pending order
-    // This algorithm so bad, that it do not allow to take ALL the orders at
-    // this floor in order not to break FCFS guarantee
-    elevators.filter({ e => e.idle && e.free }).foreach({ e =>
-      pending.filter(_.at == e.pos).foreach({ o =>
-        e.orders = e.orders.+:(o.asInstanceOf[Order])
-        pending.remove(pending.indexOf(o))
-      })
-    })
-
-    // Assign tasks in FIFO
-    // As this is FCFS we schedule only free lifts to maintain rest ordering
-    // TODO: to better serve (worse) FCFS shuffle the free lifts
-    var free = elevators.filter({ e => e.idle && e.free })
-    while (queue.nonEmpty && free.nonEmpty) {
-      // Send lifts after an order
-      val task = queue.remove(0)
-      val elevator = free.head
-      if (elevator.pos != task.at) {
-        // Serve pickup
-        elevator.tasks = List(elevator.goal(task))
-      }
-      free = free.tail
-      pending += task
-    }
-  }
-
-  override def status: ControlSystemStatus = {
-    println(s"Pending $pending")
-    super.status
-  }
-}
-
-// Greedy algorithm and:
-// 1. Serve closest free lift
-// 2. Get people on the way
-class Greedy extends ControlSystemBase {
   def take(e: Elevator): Unit = {
     queue.find(_.at == e.pos).take(1).foreach({
       o => take(e, o.direction)
@@ -272,30 +231,57 @@ class Greedy extends ControlSystemBase {
 
     // Assign
     if (queue.nonEmpty) {
-      // TODO: Count scores
-      val i = unassignedGoals.iterator
-      var free = elevators.filter({ e => e.free && e.idle })
-      while (i.hasNext && free.nonEmpty) {
-        val goal = i.next
-
-        free = free.sortBy(_.distance(goal.to))
-
-        val e = free.head
-        if (e.pos != goal.to) {
-          e.tasks = List(Goal(goal.to, goal.dir, e.distance(goal)))
-        }
-        free = free.tail
+      var free = elevators.filter(_.free)
+      var scores = free.flatMap({ e => queue.map({ r => (e, score(e)(r))})})
+      // Do not touch none
+      val skip = free.filter({ e => scores.exists({ pair => e == pair._1 && pair._2.isEmpty})})
+      free = free.filterNot(skip.contains(_))
+      scores = scores.filterNot({ pair => pair._2.isEmpty || skip.exists({_.tasks.exists(pair._2.get.same)}) })
+      // Assign best score greedy
+      while (scores.nonEmpty && free.nonEmpty) {
+        val next = scores.minBy(_._2.get.score)
+        next._1.tasks = List(next._2.get)
+        free = free.filter(_ != next._1)
+        scores = scores.filterNot({ pair => pair._1 == next._1 || pair._2.get.same(next._2.get)})
       }
+      // Stop left
+      free.foreach(_.stop())
     }
+  }
+}
 
-    // TODO: use instead of greedy closest traveling, greedy up to down or scored version
+// First-come First-served implementation of ControlSystem
+class FCFS extends ControlSystemBase {
+  override def score(e: Elevator)(g: PickupRequest): Option[Goal] = {
+    if (!e.idle) {
+      // In FCFS never reschedule elevators until they are totally Idle
+      None
+    } else {
+      Option(Goal(g.at, g.direction, e.distance(g)))
+    }
+  }
+}
+
+// Nearest Car
+class NearestCar extends ControlSystemBase {
+  def distance(e: Elevator)(g: PickupRequest) = {
+    if (e.direction == g.direction || e.direction == Idle) {
+      e.distance(g)
+    } else {
+      // Changing direction costs more
+      1 + e.distance(g)
+    }
+  }
+
+  override def score(e: Elevator)(g: PickupRequest): Option[Goal] = {
+    Option(Goal(g.at, g.direction, distance(e)(g)))
   }
 }
 
 trait TimeMachine {
   var clock = 0
 
-  def step = clock += 1
+  def step() = clock += 1
 }
 
 class Building(floors: Int, elevators: Int, residents: Int) extends TimeMachine {
@@ -305,14 +291,13 @@ class Building(floors: Int, elevators: Int, residents: Int) extends TimeMachine 
   val r = scala.util.Random
 
   val property = 1 to elevators map { _ => Elevator() }
-  val controller: ControlSystem = {
-    // val c = new FCFS
-    val c = new Greedy
+  val controller: ControlSystemBase = {
+    val c = new NearestCar
     c.connect(property)
     c
   }
 
-  override def step = {
+  override def step() = {
     clock += 1
 
     // Incoming residents

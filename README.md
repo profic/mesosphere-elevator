@@ -48,31 +48,26 @@ transform to `Orders`. `ControlSystem` watch for all incoming requests placing t
 them assigning `Tasks` to the elevators, putting them into the `pending` mode. Depending on the algorithm of the
 scheduler, system decides on priorities and what order requests to server.
 
-ControlSystem is directly connected to the elevators controllers via bus, receive pickup requests, report status to the 
-world and step through time. `Elevator` class encapsulates the state and the controller logic.
+In this distributed system Parent controller is a Master of it's child elevators controllers. Schedule system receives
+elevators updates and pickups, and evaluate scores and goals. Weighted scores are used to schedule goals to the elevators
+in active greedy manner. Reevaluation of the state happening every change.
 
 ```scala
 trait ControlSystem {
-  def connect(to: Seq[Elevator])
+  def connect(to: Seq[Elevator]) <-- should be Update
   def pickup(o: PickupRequest)
   def status: ControlSystemStatus
-  def step
+  def score(e: Elevator)(g: PickupRequest): Option[Goal]
 }
 ```
 
-In a good designed system, the scheduler should count Scores of the space of available decisions every step considering
-is there any better solution to quickly reschedule the elevators in constantly changing conditions. For the lack of time
-this counting interface replaced with simple stepper as in interface.
-
 Two schedulers are implemented:
 
-- `FCFS`: the original FCFS which simple maintains the queue of incoming requests and serve the in FIFO order, yet not allowing
-  to collect another requests on the floor.
+- `FCFS`: the original first come first served does not try reevaluate scoring solution under changing circumstances.
   
-- `Improved`: the greedy algorithm (Nearest Car) - not best among the class of approximating algorithms for the salesman problem,
-  but it's a way better then FCFS as it considers elevators move costs trying to pick closest ones in order to reduce wait time greedy way,
-  it pickups all the requests on the pickup floor coming in the same direction and then pickups everyone following the way.
-  
+- `Nearest Car`: greedy algorithm - not best among the class of approximating algorithms for the salesman problem,
+  but it's a way better then FCFS as it tries to minimize costs doing recalculations each system state change in live.
+
 Another possible improvements to the greedy algorithm are:
 
 - keep elevators uniformly distributed among the floors when they are idle to try to make wait time for the incoming residents
@@ -85,9 +80,9 @@ Another possible improvements to the greedy algorithm are:
 
 ## Good algorithms to use here
 
-- Branch  and  Bound  method
+- Branch and Bound  method
 - Christofides algorithm for the TSP
-- Ant Colony  Optimization
+- Ant Colony Optimization
 
 ## To read
 
@@ -99,15 +94,15 @@ Another possible improvements to the greedy algorithm are:
   Second Edition.
 - Time dependent traveling salesman problem
 - Ant Colony Optimization for single car scheduling of elevator systems with full information
-- M. Brand and D. Nikovski, “Optimal Parking in Group Elevator Control,” Proceedings of the 2004 IEEE International
+- M. Brand and D. Nikovski, ï¿½Optimal Parking in Group Elevator Control,ï¿½ Proceedings of the 2004 IEEE International
   Conference on Robotics & Automation (2004) 1002-1008.
-- D. Nikovski and M. Brand, “Marginalizing Out Future Passengers in Group Elevator Control,” Proceedings of the
+- D. Nikovski and M. Brand, ï¿½Marginalizing Out Future Passengers in Group Elevator Control,ï¿½ Proceedings of the
 Nineteenth Conference on Uncertainty in Artificial Intelligence (2003) 443-450.
-- D. Nikovski and M. Brand, “Decision-theoretic group elevator scheduling,” 13th International Conference on Automated
+- D. Nikovski and M. Brand, ï¿½Decision-theoretic group elevator scheduling,ï¿½ 13th International Conference on Automated
 Planning and Scheduling (2003).
-- D. Nikovski and M. Brand, “Exact Calculation of Expected Waiting Times for Group Elevator Control,” IEEE
+- D. Nikovski and M. Brand, ï¿½Exact Calculation of Expected Waiting Times for Group Elevator Control,ï¿½ IEEE
 Transportation Automation Control 49(10) pp. 1820-1823.
-- IBM, “Smarter Buildings Survey,” Apr. 29 2010.
-- T. Strang anad C. Bauer, “Context-Aware Elevator Scheduling,” 21st International Conference on Advanced Information
+- IBM, ï¿½Smarter Buildings Survey,ï¿½ Apr. 29 2010.
+- T. Strang anad C. Bauer, ï¿½Context-Aware Elevator Scheduling,ï¿½ 21st International Conference on Advanced Information
 Networking and Applications Workshops (2007) vol. 2 pp. 276-281.
-- National Elevator Industry, Inc. A “Step by Step” Guide.
+- National Elevator Industry, Inc. A ï¿½Step by Stepï¿½ Guide.
