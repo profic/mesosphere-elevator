@@ -54,10 +54,12 @@ in active greedy manner. Reevaluation of the state happening every change.
 
 ```scala
 trait ControlSystem {
-  def connect(to: Seq[Elevator]) <-- should be Update
-  def pickup(o: PickupRequest)
-  def status: ControlSystemStatus
-  def score(e: Elevator)(g: PickupRequest): Option[Goal]
+  def pickup(o: PickupRequest): Unit
+  def release(o: PickupRequest): Unit
+
+  def update(to: ElevatorSnapshot): Unit
+
+  def score(e: ElevatorSnapshot)(g: PickupRequest): Option[Goal]
 }
 ```
 
@@ -77,6 +79,8 @@ Another possible improvements to the greedy algorithm are:
   the request than count on free ones.
 
 - add max wait time constraint
+
+- score tracks with closest goals, not just goals separate
 
 ## Good algorithms to use here
 
