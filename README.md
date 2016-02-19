@@ -58,8 +58,7 @@ trait ControlSystem {
   def release(o: PickupRequest): Unit
 
   def update(to: ElevatorSnapshot): Unit
-
-  def score(e: ElevatorSnapshot)(g: PickupRequest): Option[Goal]
+  def score(eid: Int)(g: PickupRequest): Option[Goal]
 }
 ```
 
@@ -98,15 +97,15 @@ Another possible improvements to the greedy algorithm are:
   Second Edition.
 - Time dependent traveling salesman problem
 - Ant Colony Optimization for single car scheduling of elevator systems with full information
-- M. Brand and D. Nikovski, �Optimal Parking in Group Elevator Control,� Proceedings of the 2004 IEEE International
+- M. Brand and D. Nikovski, Optimal Parking in Group Elevator Control, Proceedings of the 2004 IEEE International
   Conference on Robotics & Automation (2004) 1002-1008.
-- D. Nikovski and M. Brand, �Marginalizing Out Future Passengers in Group Elevator Control,� Proceedings of the
+- D. Nikovski and M. Brand, Marginalizing Out Future Passengers in Group Elevator Control, Proceedings of the
 Nineteenth Conference on Uncertainty in Artificial Intelligence (2003) 443-450.
-- D. Nikovski and M. Brand, �Decision-theoretic group elevator scheduling,� 13th International Conference on Automated
+- D. Nikovski and M. Brand, Decision-theoretic group elevator scheduling,13th International Conference on Automated
 Planning and Scheduling (2003).
-- D. Nikovski and M. Brand, �Exact Calculation of Expected Waiting Times for Group Elevator Control,� IEEE
+- D. Nikovski and M. Brand, Exact Calculation of Expected Waiting Times for Group Elevator Control, IEEE
 Transportation Automation Control 49(10) pp. 1820-1823.
-- IBM, �Smarter Buildings Survey,� Apr. 29 2010.
-- T. Strang anad C. Bauer, �Context-Aware Elevator Scheduling,� 21st International Conference on Advanced Information
+- IBM, Smarter Buildings Survey, Apr. 29 2010.
+- T. Strang anad C. Bauer, Context-Aware Elevator Scheduling, 21st International Conference on Advanced Information
 Networking and Applications Workshops (2007) vol. 2 pp. 276-281.
-- National Elevator Industry, Inc. A �Step by Step� Guide.
+- National Elevator Industry, Inc. A Step by Step Guide.
