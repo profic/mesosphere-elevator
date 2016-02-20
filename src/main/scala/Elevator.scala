@@ -18,10 +18,12 @@ case class PickupRequest(at: Int, direction: Direction)
 case class Goal(to: Int, dir: Direction, score: Double) {
   def same(r: PickupRequest): Boolean = r.at == to && r.direction == dir
   def same(g: Goal): Boolean = g.to == to && g.dir == dir
+  def distance(g: Goal): Int = math.abs(g.to - to)
 }
 
 object Goal {
-  def apply(r: PickupRequest, distance: PickupRequest => Int): Goal = new Goal(r.at, r.direction, distance(r))
+  def apply(distance: PickupRequest => Int)(r: PickupRequest): Goal = new Goal(r.at, r.direction, distance(r))
+  def apply(r: PickupRequest, score: Double): Goal = new Goal(r.at, r.direction, score)
 }
 
 case class Order(oid: Int, from: Int, to: Int, time: Int) {
@@ -66,17 +68,11 @@ trait ElevatorState {
     }).getOrElse(Idle)
   }
 
-  def distance(to: Int): Int = {
-    math.abs(to - pos)
-  }
+  def distance(to: Int): Int = math.abs(to - pos)
 
-  def distance(to: Goal): Int = {
-    distance(to.to)
-  }
+  def distance(to: Goal): Int = distance(to.to)
 
-  def distance(to: PickupRequest): Int = {
-    distance(to.at)
-  }
+  def distance(to: PickupRequest): Int = distance(to.at)
 
   def distance(to: Order): Int = {
     if (orders.contains(to)) {
@@ -100,9 +96,9 @@ trait ElevatorController {
 
   def goal(to: Order): Goal = {
     if (state.orders.contains(to)) {
-      Goal(to.pickupTo, state.distance)
+      Goal(state.distance)(to.pickupTo)
     } else {
-      Goal(to.pickupFrom, state.distance)
+      Goal(state.distance)(to.pickupFrom)
     }
   }
 
@@ -116,7 +112,7 @@ trait ElevatorController {
     }
 
     if (state.direction == Idle && state.tasks.nonEmpty) {
-      state.prev = Option(state.tasks.head)
+      state.prev = state.tasks.headOption
       state.tasks = state.tasks.tail
     }
   }
@@ -134,16 +130,16 @@ case class ElevatorSnapshot(id: Int, state: ElevatorState) extends ElevatorState
 class Elevator(id: Int) extends ElevatorState with ElevatorController {
   override def state = this
 
+  def Id = id
+
+  def snapshot: ElevatorSnapshot = ElevatorSnapshot(id, state)
+
   private[this] def describeIntention = {
     direction match {
       case Idle => "Idle"
       case x => s"going $x/$tasks"
     }
   }
-
-  def Id = id
-
-  def snapshot: ElevatorSnapshot = ElevatorSnapshot(id, state)
 
   override def toString = s"Elevator #$id at $pos, $describeIntention carry $orders"
 }
@@ -164,17 +160,17 @@ trait ControlSystem {
   def release(o: PickupRequest): Unit
 
   def update(to: ElevatorSnapshot): Unit
-  def score(eid: Int)(g: PickupRequest): Option[Goal]
+  def score(id: Int)(g: PickupRequest): Option[Double]
 }
 
-abstract class ControlSystemBase extends ControlSystem {
+abstract class ControlSystemBase(floors: Int) extends ControlSystem {
   val state = scala.collection.mutable.Map[Int, ElevatorSnapshot]()
   val goals = scala.collection.mutable.Set[PickupRequest]()
 
   var clock = 1
   var solutionClock = 0
 
-  var solution = scala.collection.immutable.Map[(Int, PickupRequest), Goal]()
+  var solution = scala.collection.immutable.Map[(Int, PickupRequest), Double]()
 
   override def pickup(o: PickupRequest) = {
     if (!goals.contains(o)) {
@@ -196,19 +192,19 @@ abstract class ControlSystemBase extends ControlSystem {
     state(to.id) = to
   }
 
-  def score(e: ElevatorSnapshot)(g: PickupRequest): Option[Goal]
+  def score(e: ElevatorSnapshot)(g: PickupRequest): Option[Double]
 
-  override def score(eid: Int)(g: PickupRequest) = {
+  override def score(id: Int)(g: PickupRequest) = {
     if (solutionClock < clock) {
       println(s"Solution at #$clock")
       solution = solve
       solutionClock = clock
     }
 
-    solution get (eid, g)
+    solution get (id, g)
   }
 
-  private[this] def solve: scala.collection.immutable.Map[(Int, PickupRequest), Goal] = {
+  private[this] def solve: scala.collection.immutable.Map[(Int, PickupRequest), Double] = {
     if (goals.nonEmpty) {
       state.values
         .filter(_.free)
@@ -228,19 +224,19 @@ abstract class ControlSystemBase extends ControlSystem {
 }
 
 // First-come First-served implementation of ControlSystem
-class FCFS extends ControlSystemBase {
-  override def score(e: ElevatorSnapshot)(g: PickupRequest): Option[Goal] = {
+class FCFS(floors: Int) extends ControlSystemBase(floors) {
+  override def score(e: ElevatorSnapshot)(g: PickupRequest): Option[Double] = {
     if (!e.idle) {
       // In FCFS never reschedule elevators until they are totally Idle
       None
     } else {
-      Option(Goal(g.at, g.direction, e.distance(g)))
+      Option(1 + floors - e.distance(g))
     }
   }
 }
 
 // Nearest Car
-class NearestCar extends ControlSystemBase {
+class NearestCar(floors: Int) extends ControlSystemBase(floors) {
   def distance(e: ElevatorSnapshot)(g: PickupRequest) = {
     if (e.direction == g.direction || e.direction == Idle) {
       e.distance(g)
@@ -250,8 +246,8 @@ class NearestCar extends ControlSystemBase {
     }
   }
 
-  override def score(e: ElevatorSnapshot)(g: PickupRequest): Option[Goal] = {
-    Option(Goal(g.at, g.direction, distance(e)(g)))
+  override def score(e: ElevatorSnapshot)(g: PickupRequest): Option[Double] = {
+    Option(1 + floors - distance(e)(g))
   }
 }
 
@@ -269,9 +265,11 @@ class Building(floors: Int, size: Int, residents: Int) extends TimeMachine {
 
   val elevators = 1 to size map { _ => Elevator() }
 
-  val controller: ControlSystem = new NearestCar
+  val controller: ControlSystem = algorithm
 
   var queue = new ListBuffer[Order]()
+
+  def algorithm = new NearestCar(floors)
 
   def take(e: Elevator): Unit = {
     // Most angry men wins
@@ -289,7 +287,7 @@ class Building(floors: Int, size: Int, residents: Int) extends TimeMachine {
       .foreach({ o =>
         e.orders :+= o
         queue -= o
-    })
+      })
   }
 
   def goals: Iterable[PickupRequest] = queue.map(_.pickupFrom).groupBy(_.at).flatMap({ a =>
@@ -303,7 +301,9 @@ class Building(floors: Int, size: Int, residents: Int) extends TimeMachine {
         if (e.free && e.idle) {
           if (e.prev.nonEmpty) {
             take(e, e.prev.get.dir)
-          } else {
+          }
+
+          if (e.free) {
             take(e)
           }
         }
@@ -322,7 +322,6 @@ class Building(floors: Int, size: Int, residents: Int) extends TimeMachine {
         queue += o
         controller.pickup(o.pickupFrom)
       }
-      println(s"Queue $queue")
     }
 
     def takeoff() = {
@@ -338,23 +337,40 @@ class Building(floors: Int, size: Int, residents: Int) extends TimeMachine {
     }
 
     def schedule() = {
-      var free: Seq[Elevator] = elevators.filter(_.free)
-      var scores: Seq[(Elevator, Option[Goal])] = free.flatMap({ e => goals.map({ s => (e, controller.score(e.Id)(s)) })})
-      // Skip elevators schedule asks to backoff from
-      // TODO filter goals by any from elevators assigned tasks
-      val skip = free.filter({ e => scores.exists({ pair => e == pair._1 && pair._2.isEmpty }) })
-      free = free.filterNot(skip.contains(_))
-      scores = scores.filterNot({ pair => pair._2.isEmpty || skip.exists({ _.tasks.exists(pair._2.get.same) }) })
-      // Assign best score greedy
-      while (scores.nonEmpty && free.nonEmpty) {
-        val next = scores.minBy(_._2.get.score)
-        next._1.tasks = List(next._2.get)
-        free = free.filter(_ != next._1)
-        scores = scores.filterNot({ pair => pair._1 == next._1 || pair._2.get.same(next._2.get) })
-        // TODO filter slices of 2 conseq pickups as well
+      def filterSchedulingSet(free: Seq[Elevator], skip: Seq[Elevator], scores: Seq[(Elevator, Option[Goal])]):
+        (Seq[Elevator], Seq[(Elevator, Option[Goal])]) = {
+
+        val skipGoals: Seq[Goal] = skip.flatMap(_.selectPath)
+
+        ( free.filterNot(skip.contains), scores.filterNot({ pair =>
+          skip.contains(pair._1) || pair._2.isEmpty || skipGoals.exists(pair._2.get.same) }) )
       }
-      // Stop left
-      free.foreach(_.stop())
+
+      def schedulingSet: (Seq[Elevator], Seq[(Elevator, Option[Goal])]) = {
+        val free: Seq[Elevator] = elevators.filter(_.free)
+        val scores: Seq[(Elevator, Option[Goal])] = free
+          .flatMap({ elevator =>
+            goals.map({ pickup =>
+              (elevator, controller.score(elevator.Id)(pickup).map({ s => Goal(pickup, s)})) })})
+
+        // Skip elevators scheduler asks to backoff from
+        filterSchedulingSet(free,  scores.filter(_._2.isEmpty).groupBy(_._1).keys.toList, scores)
+      }
+
+      var space = schedulingSet
+
+      // Assign best score greedy
+      while (space._1.nonEmpty && space._2.nonEmpty) {
+        val (free, scores) = space
+
+        val best = scores.maxBy(_._2.get.score)
+        best._1.tasks = List(best._2.get)
+
+        space = filterSchedulingSet(free, List(best._1), scores)
+      }
+
+      // Rest idle
+      space._1.foreach(_.stop())
     }
 
     clock += 1
@@ -390,6 +406,7 @@ class Building(floors: Int, size: Int, residents: Int) extends TimeMachine {
   }
 
   def show() = {
+    println(s"Queue $queue")
     for (e <- elevators) {
       println(e)
     }
